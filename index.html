@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Calo Tracker AI</title>
+    <link rel="stylesheet" href="style.css">
+    <!-- Thư viện Icon -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <!-- Thư viện Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        /* CSS cho thông báo Toast đẹp mắt */
+        #notification-container {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 9999;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .toast {
+            background: #fff;
+            color: #333;
+            padding: 15px 20px;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            min-width: 300px;
+            border-left: 5px solid #4CAF50;
+            animation: slideIn 0.3s ease-out forwards, fadeOut 0.5s ease-in 4.5s forwards;
+        }
+        .toast.warning { border-left-color: #FF9800; }
+        .toast i { font-size: 1.4em; }
+        @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+        @keyframes fadeOut { from { opacity: 1; } to { opacity: 0; } }
+    </style>
+</head>
+<body>
+
+    <div class="app-container">
+        
+        <!-- MÀN HÌNH ĐĂNG NHẬP / ĐĂNG KÝ -->
+        <div id="auth-view">
+            <div style="text-align:center; margin-top: 50px; margin-bottom: 30px;">
+                <h1 style="color:var(--primary-dark); font-size: 28px;">Calo Tracker</h1>
+                <p style="color:#666;">Đăng nhập để đồng bộ dữ liệu</p>
+            </div>
+
+            <div class="card" style="margin: 20px;">
+                <h3 id="auth-title">Đăng nhập</h3>
+                <!-- Thêm thẻ form và autocomplete để sửa lỗi DOM warning -->
+                <form onsubmit="event.preventDefault();">
+                    <div class="form-group">
+                        <label>Email</label>
+                        <input type="email" id="auth-email" placeholder="email@example.com" autocomplete="username">
+                    </div>
+                    <div class="form-group">
+                        <label>Mật khẩu</label>
+                        <input type="password" id="auth-password" placeholder="******" autocomplete="current-password">
+                    </div>
+                    
+                    <button type="button" class="btn-primary" id="btn-auth-action" onclick="handleLogin()">Đăng nhập</button>
+                </form>
+                
+                <p style="text-align:center; margin-top:15px; font-size:13px;">
+                    <span id="auth-switch-text">Chưa có tài khoản?</span> 
+                    <a href="#" onclick="toggleAuthMode()" style="color:var(--primary); font-weight:bold;">Bấm vào đây</a>
+                </p>
+                <p id="auth-error" style="color:red; font-size:12px; text-align:center; margin-top:10px; display:none;"></p>
+            </div>
+        </div>
+
+        <!-- GIAO DIỆN CHÍNH (Ẩn mặc định) -->
+        <div id="app-view" class="hidden" style="display:flex; flex-direction:column; height:100%;">
+
+        <!-- Header -->
+        <header>
+            <h1>Calo Tracker</h1>
+            <div class="summary-bar">
+                <span>Mục tiêu: <b id="target-kcal">--</b></span>
+            </div>
+        </header>
+
+        <!-- Nội dung chính -->
+        <main id="main-content">
+            
+            <!-- TAB 1: TRANG CHỦ -->
+            <section id="tab-home" class="active-tab">
+                <!-- Vòng tròn tiến độ -->
+                <div class="progress-card">
+                    <div class="circle-progress">
+                        <div class="inner-circle">
+                            <span id="remaining-kcal">0</span>
+                            <small>Còn lại</small>
+                        </div>
+                    </div>
+                    <div class="stats-row">
+                        <div>Đã nạp: <span id="consumed-kcal">0</span></div>
+                        <div>Đã đốt: <span id="burned-kcal">0</span></div> <!-- Tạm tính cơ bản -->
+                    </div>
+                    <div class="stats-row" style="border-top: 1px solid #eee; padding-top: 8px; margin-top: 8px;">
+                        <div>BMI: <span id="disp-bmi" style="font-weight:bold; color:#333">--</span></div>
+                        <div>BMR: <span id="disp-bmr" style="font-weight:bold; color:#333">--</span></div>
+                        <div>WHtR: <span id="disp-whtr" style="font-weight:bold; color:#333">--</span></div>
+                    </div>
+                </div>
+
+                <!-- Nhập thức ăn -->
+                <div class="card">
+                    <h3>Nạp năng lượng</h3>
+                    <div class="search-box">
+                        <input type="text" id="food-name" placeholder="Bạn vừa ăn gì?">
+                        <button onclick="searchFood()"><i class="fas fa-search"></i></button>
+                    </div>
+                    
+                    <!-- Kết quả tìm kiếm / Nhập tay -->
+                    <div id="food-result" class="hidden">
+                        <p class="result-title">Món: <b id="res-name"></b></p>
+                        
+                        <div class="input-group" style="align-items: flex-start;">
+                            <label style="margin-top: 12px;">Kcal/100g:</label>
+                            <div style="flex:1;">
+                                <input type="number" id="res-kcal-unit" placeholder="Nhập số liệu">
+                                <!-- Dòng thông báo tinh tế nằm ngay dưới ô nhập -->
+                                <small id="auto-estimate-msg" class="hidden" style="color: #f57c00; font-size: 11px; margin-top: 4px; display: block;">
+                                    <i class="fas fa-magic"></i> Ước tính tự động
+                                </small>
+                            </div>
+                        </div>
+                        
+                        <div class="input-group">
+                            <label>Khối lượng (g):</label>
+                            <input type="number" id="res-weight" value="100">
+                        </div>
+                        
+                        <button class="btn-primary" onclick="addFoodToLog()">Thêm vào nhật ký</button>
+                    </div>
+                </div>
+
+                
+
+                <!-- Vận động -->
+                <div class="card">
+                    <h3>Vận động hôm nay</h3>
+                    <div class="input-group">
+                        <label>Hoạt động:</label>
+                        <input type="text" id="activity-name" placeholder="VD: Chạy bộ" oninput="suggestActivityRate()">
+                    </div>
+                    <div class="input-group">
+                        <label>Kcal/30p:</label>
+                        <input type="number" id="activity-rate" placeholder="VD: 150" oninput="previewActivityKcal()">
+                    </div>
+                    <div class="input-group" style="align-items: flex-start;">
+                        <label style="margin-top: 12px;">Thời gian (phút):</label>
+                        <div style="flex:1;">
+                            <input type="number" id="activity-duration" placeholder="VD: 30" oninput="previewActivityKcal()">
+                            <small id="activity-est-msg" class="hidden" style="color: #e53935; font-size: 11px; margin-top: 4px; display: block;">
+                                <i class="fas fa-fire"></i> Ước tính đốt: <b id="preview-burned">0</b> kcal
+                            </small>
+                        </div>
+                    </div>
+                    <button class="btn-secondary" onclick="addActivityToLog()">Thêm vận động</button>
+                    <ul id="today-activity-list" class="food-list" style="margin-top: 15px;">
+                        <!-- Activity items will go here -->
+                    </ul>
+                </div>
+
+                <!-- Danh sách hôm nay -->
+                <div class="card">
+                    <h3>Hôm nay ăn gì?</h3>
+                    <ul id="today-list" class="food-list">
+                        <!-- Item sẽ được thêm bằng JS -->
+                    </ul>
+                </div>
+            </section>
+
+            <!-- TAB 2: LỊCH SỬ -->
+            <section id="tab-history">
+                <ul id="history-list" class="food-list">
+                    <!-- Item lịch sử -->
+                </ul>
+            </section>
+
+            <!-- TAB 4: BIỂU ĐỒ -->
+            <section id="tab-charts">
+                <h2>Theo dõi chỉ số</h2>
+                <div class="card">
+                    <canvas id="weightChart"></canvas>
+                    <p style="text-align:center; font-size:12px; color:#666; margin-top:10px;">Biểu đồ thay đổi cân nặng theo thời gian</p>
+                </div>
+            </section>
+
+            <!-- TAB 3: CẤU HÌNH -->
+            <section id="tab-settings">
+                <h2>Cài đặt chỉ số</h2>
+                <div class="card">
+                    <form id="settings-form">
+                        <div class="form-group">
+                            <label>Ngày ghi nhận</label>
+                            <input type="date" id="set-date">
+                        </div>
+
+                        <div class="form-group">
+                            <label>Cân nặng (kg)</label>
+                            <input type="number" id="set-weight" placeholder="VD: 70">
+                        </div>
+                        
+                        <div class="form-group">
+                            <label>Chiều cao (cm)</label>
+                            <input type="number" id="set-height" placeholder="VD: 170">
+                        </div>
+                        
+                        <div class="form-group">
+                            <label>Vòng eo (cm)</label>
+                            <input type="number" id="set-waist" placeholder="VD: 75">
+                        </div>
+                        
+                        <div class="form-group">
+                            <label>Tuổi</label>
+                            <input type="number" id="set-age" placeholder="VD: 25">
+                        </div>
+                        
+                        <div class="form-group">
+                            <label>Giới tính</label>
+                            <select id="set-gender">
+                                <option value="male">Nam</option>
+                                <option value="female">Nữ</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group">
+                            <label>Mức độ vận động</label>
+                            <select id="set-activity">
+                                <option value="1.2">Ít vận động (Văn phòng)</option>
+                                <option value="1.375">Nhẹ (1-3 ngày/tuần)</option>
+                                <option value="1.55">Vừa (3-5 ngày/tuần)</option>
+                                <option value="1.725">Nhiều (6-7 ngày/tuần)</option>
+                            </select>
+                        </div>
+
+                        <button type="button" class="btn-primary" onclick="saveSettings()">Lưu & Tính TDEE</button>
+                        
+                        <button type="button" class="btn-secondary" onclick="handleLogout()" style="background:#e53935; margin-top:20px;">
+                            <i class="fas fa-sign-out-alt"></i> Đăng xuất
+                        </button>
+                    </form>
+                </div>
+            </section>
+
+        </main>
+
+        <!-- Menu dưới cùng -->
+        <nav class="bottom-nav">
+            <button onclick="switchTab('tab-home')" class="nav-btn active">
+                <i class="fas fa-home"></i><span>Home</span>
+            </button>
+            <button onclick="switchTab('tab-history')" class="nav-btn">
+                <i class="fas fa-history"></i><span>Lịch sử</span>
+            </button>
+            <button onclick="switchTab('tab-charts')" class="nav-btn">
+                <i class="fas fa-chart-line"></i><span>Biểu đồ</span>
+            </button>
+            <button onclick="switchTab('tab-settings')" class="nav-btn">
+                <i class="fas fa-user-cog"></i><span>Cấu hình</span>
+            </button>
+        </nav>
+        </div> <!-- End #app-view -->
+    </div>
+
+    <!-- Container chứa các thông báo -->
+    <div id="notification-container"></div>
+
+    <!-- Firebase SDKs (Phiên bản Compat để dễ dùng cho web tĩnh) -->
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
+    
+    <!-- File Logic chính -->
+    <script src="script.js"></script>
+</body>
+</html>
