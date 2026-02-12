@@ -112,9 +112,10 @@
                 <!-- Nhập thức ăn -->
                 <div class="card">
                     <h3>Nạp năng lượng</h3>
-                    <div class="search-box">
-                        <input type="text" id="food-name" placeholder="Bạn vừa ăn gì?">
+                    <div class="search-box" style="position: relative;">
+                        <input type="text" id="food-name" placeholder="Bạn vừa ăn gì?" autocomplete="off">
                         <button onclick="searchFood()"><i class="fas fa-search"></i></button>
+                        <ul id="food-suggestions" class="suggestions-list hidden"></ul>
                     </div>
                     
                     <!-- Kết quả tìm kiếm / Nhập tay -->
@@ -148,30 +149,27 @@
                     <h3>Vận động hôm nay</h3>
                     <div class="input-group">
                         <label>Hoạt động:</label>
-                        <input type="text" id="activity-name" placeholder="VD: Chạy bộ" oninput="suggestActivityRate()">
+                        <input type="text" id="activity-name" placeholder="Chạy bộ" oninput="suggestActivityRate()">
                     </div>
                     <div class="input-group">
                         <label>Kcal/30p:</label>
-                        <input type="number" id="activity-rate" placeholder="VD: 150" oninput="previewActivityKcal()">
+                        <input type="number" id="activity-rate" placeholder="150" oninput="previewActivityKcal()">
                     </div>
                     <div class="input-group" style="align-items: flex-start;">
                         <label style="margin-top: 12px;">Thời gian (phút):</label>
                         <div style="flex:1;">
-                            <input type="number" id="activity-duration" placeholder="VD: 30" oninput="previewActivityKcal()">
+                            <input type="number" id="activity-duration" placeholder="30" oninput="previewActivityKcal()">
                             <small id="activity-est-msg" class="hidden" style="color: #e53935; font-size: 11px; margin-top: 4px; display: block;">
                                 <i class="fas fa-fire"></i> Ước tính đốt: <b id="preview-burned">0</b> kcal
                             </small>
                         </div>
                     </div>
                     <button class="btn-secondary" onclick="addActivityToLog()">Thêm vận động</button>
-                    <ul id="today-activity-list" class="food-list" style="margin-top: 15px;">
-                        <!-- Activity items will go here -->
-                    </ul>
                 </div>
 
                 <!-- Danh sách hôm nay -->
                 <div class="card">
-                    <h3>Hôm nay ăn gì?</h3>
+                    <h3>Hôm nay thế nào?</h3>
                     <ul id="today-list" class="food-list">
                         <!-- Item sẽ được thêm bằng JS -->
                     </ul>
@@ -219,17 +217,19 @@
                             <input type="number" id="set-waist" placeholder="VD: 75">
                         </div>
                         
-                        <div class="form-group">
-                            <label>Tuổi</label>
-                            <input type="number" id="set-age" placeholder="VD: 25">
-                        </div>
-                        
-                        <div class="form-group">
-                            <label>Giới tính</label>
-                            <select id="set-gender">
-                                <option value="male">Nam</option>
-                                <option value="female">Nữ</option>
-                            </select>
+                        <div style="display: flex; gap: 10px;">
+                            <div class="form-group" style="flex: 1;">
+                                <label>Tuổi</label>
+                                <input type="number" id="set-age" placeholder="VD: 25">
+                            </div>
+                            
+                            <div class="form-group" style="flex: 1;">
+                                <label>Giới tính</label>
+                                <select id="set-gender">
+                                    <option value="male">Nam</option>
+                                    <option value="female">Nữ</option>
+                                </select>
+                            </div>
                         </div>
 
                         <div class="form-group">
@@ -244,6 +244,10 @@
 
                         <button type="button" class="btn-primary" onclick="saveSettings()">Lưu & Tính TDEE</button>
                         
+                        <button type="button" class="btn-secondary" onclick="openGuideModal()" style="background:#607D8B; margin-top:10px;">
+                            <i class="fas fa-book"></i> Hướng dẫn sử dụng
+                        </button>
+
                         <button type="button" class="btn-secondary" onclick="handleLogout()" style="background:#e53935; margin-top:20px;">
                             <i class="fas fa-sign-out-alt"></i> Đăng xuất
                         </button>
@@ -269,6 +273,68 @@
             </button>
         </nav>
         </div> <!-- End #app-view -->
+    </div>
+
+    <!-- MODAL CHỈNH SỬA (Ẩn mặc định) -->
+    <div id="edit-modal" class="modal hidden">
+        <div class="modal-content">
+            <h3>Chỉnh sửa</h3>
+            <p id="edit-item-name" style="color:var(--primary-dark); font-weight:bold; margin-bottom:15px;"></p>
+            
+            <div class="input-group">
+                <label id="edit-label">Số lượng:</label>
+                <input type="number" id="edit-quantity">
+            </div>
+            
+            <!-- Lưu trữ ID và Type ẩn -->
+            <input type="hidden" id="edit-id">
+            <input type="hidden" id="edit-type">
+
+            <button class="btn-primary" onclick="saveEditItem()">Lưu thay đổi</button>
+            <button class="btn-secondary" onclick="deleteItem()" style="background:#e53935; margin-top:10px;">Xóa mục này</button>
+            <button class="btn-secondary" onclick="closeEditModal()" style="background:#757575; margin-top:10px;">Hủy</button>
+        </div>
+    </div>
+
+    <!-- MODAL HƯỚNG DẪN SỬ DỤNG -->
+    <div id="guide-modal" class="modal hidden">
+        <div class="modal-content" style="max-height: 80vh; display: flex; flex-direction: column;">
+            <h3 style="text-align: center; border-bottom: 1px solid #eee; padding-bottom: 10px;">Hướng dẫn sử dụng</h3>
+            
+            <!-- Khu vực nội dung có thể cuộn -->
+            <div style="overflow-y: auto; text-align: left; margin: 10px 0; padding-right: 5px; line-height: 1.6; font-size: 14px; color: #333;">
+                <p><strong>1. Trang chủ (Home):</strong></p>
+                <ul style="padding-left: 20px; margin-bottom: 10px;">
+                    <li><b>Nạp năng lượng:</b> Nhập tên món ăn. Hệ thống sẽ gợi ý nếu món đã có, hoặc tự ước tính calo nếu món mới.</li>
+                    <li><b>Vận động:</b> Nhập hoạt động và thời gian tập luyện để trừ bớt calo dư thừa.</li>
+                    <li><b>Hôm nay thế nào:</b> Xem lại danh sách đã nhập. Bấm vào từng mục để <i>Sửa</i> hoặc <i>Xóa</i>.</li>
+                </ul>
+
+                <p><strong>2. Chỉ số cơ thể:</strong></p>
+                <ul style="padding-left: 20px; margin-bottom: 10px;">
+                    <li><b>TDEE:</b> Tổng năng lượng bạn tiêu hao mỗi ngày. Ăn ít hơn số này để giảm cân.</li>
+                    <li><b>Vòng tròn màu:</b> Xanh lá (An toàn) -> Đỏ (Vượt quá mức cho phép).</li>
+                </ul>
+
+                <p><strong>3. Lịch sử & Biểu đồ:</strong></p>
+                <ul style="padding-left: 20px; margin-bottom: 10px;">
+                    <li>Xem lại nhật ký ăn uống 30 ngày gần nhất.</li>
+                    <li>Theo dõi biểu đồ cân nặng để thấy sự tiến bộ.</li>
+                </ul>
+
+                <p><strong>4. Ý nghĩa các chỉ số:</strong></p>
+                <ul style="padding-left: 20px; margin-bottom: 10px;">
+                    <li><b>BMI (Body Mass Index):</b> Đánh giá mức độ gầy/béo. <br><small><i>Dưới 18.5: Gầy | 18.5 - 22.9: Bình thường | Trên 23: Thừa cân.</i></small></li>
+                    <li><b>BMR (Basal Metabolic Rate):</b> Năng lượng tối thiểu cơ thể cần để duy trì sự sống (thở, tim đập...) khi nghỉ ngơi hoàn toàn.</li>
+                    <li><b>TDEE:</b> Tổng năng lượng tiêu hao thực tế trong ngày (BMR + Vận động). <br><small><i>Muốn giảm cân: Ăn < TDEE. Muốn tăng cân: Ăn > TDEE.</i></small></li>
+                    <li><b>WHtR (Waist to Height):</b> Tỷ lệ Vòng eo / Chiều cao. <br><small><i>Đánh giá mỡ bụng chính xác hơn BMI. Lý tưởng là dưới 0.5.</i></small></li>
+                </ul>
+
+                <p><i>Mẹo: Hãy nhập liệu đều đặn để AI học thói quen của bạn tốt hơn!</i></p>
+            </div>
+
+            <button class="btn-secondary" onclick="closeGuideModal()" style="margin-top: 0;">Đóng</button>
+        </div>
     </div>
 
     <!-- Container chứa các thông báo -->
