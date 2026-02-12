@@ -349,7 +349,7 @@ async function searchFood() {
         }
     } catch (error) {
         console.error("Lỗi tìm kiếm:", error);
-        alert("Lỗi kết nối database. Kiểm tra config Firebase.");
+        showNotification("Lỗi kết nối database", "warning");
     }
 }
 
@@ -382,7 +382,7 @@ async function addFoodToLog() {
     const weight = parseFloat(document.getElementById('res-weight').value);
 
     if (!name || isNaN(kcalUnit) || isNaN(weight)) {
-        alert("Vui lòng nhập đủ thông tin");
+        showNotification("Vui lòng nhập đủ thông tin", "warning");
         return;
     }
 
@@ -485,7 +485,7 @@ async function addActivityToLog() {
     const rate30 = parseFloat(document.getElementById('activity-rate').value);
 
     if (!name || isNaN(duration) || duration <= 0 || isNaN(rate30)) {
-        alert("Vui lòng nhập đầy đủ thông tin (Tên, Kcal/30p, Thời gian).");
+        showNotification("Vui lòng nhập đủ thông tin", "warning");
         return;
     }
 
@@ -653,7 +653,7 @@ async function saveEditItem() {
     const newQty = parseFloat(document.getElementById('edit-quantity').value);
 
     if (isNaN(newQty) || newQty <= 0) {
-        alert("Số lượng không hợp lệ");
+        showNotification("Số lượng không hợp lệ", "warning");
         return;
     }
 
@@ -687,8 +687,28 @@ async function saveEditItem() {
     showNotification("Đã cập nhật thành công!");
 }
 
+let deleteTimer = null; // Biến đếm giờ cho nút xóa
+
 async function deleteItem() {
-    if(!confirm("Bạn có chắc muốn xóa mục này không?")) return;
+    // Thay thế confirm() bằng logic bấm 2 lần để xóa
+    const btn = event.target; // Lấy nút đang được bấm
+    
+    if (btn.innerText !== "Xác nhận xóa?") {
+        // Lần bấm 1: Đổi text nút để hỏi lại
+        const originalText = btn.innerText;
+        btn.innerText = "Xác nhận xóa?";
+        btn.style.background = "#b71c1c"; // Đổi màu đỏ đậm hơn
+        
+        // Nếu không bấm tiếp trong 3s thì reset lại
+        deleteTimer = setTimeout(() => {
+            btn.innerText = originalText;
+            btn.style.background = "#e53935";
+        }, 3000);
+        return; // Dừng lại, chờ bấm lần 2
+    }
+    
+    // Lần bấm 2: Thực hiện xóa thật
+    if (deleteTimer) clearTimeout(deleteTimer);
     
     const id = document.getElementById('edit-id').value;
     const type = document.getElementById('edit-type').value;
@@ -709,7 +729,7 @@ async function deleteItem() {
         showNotification("Đã xóa mục đã chọn");
     } catch (e) {
         console.error(e);
-        alert("Lỗi khi xóa: " + e.message);
+        showNotification("Lỗi khi xóa: " + e.message, "warning");
     }
 }
 
@@ -828,7 +848,7 @@ async function loadHistory() {
         console.error("Lỗi tải lịch sử:", e);
         list.innerHTML = `<li style="color:red; text-align:center; flex-direction:column;">Lỗi tải dữ liệu.<small>${e.message}</small></li>`;
         if (e.message.includes("index")) {
-            alert("Lỗi: Cần tạo Index trên Firebase Console để sắp xếp lịch sử.");
+            showNotification("Cần tạo Index trên Firebase", "warning");
         }
     }
 }
@@ -865,7 +885,7 @@ async function loadCharts() {
     } catch (error) {
         console.error("Lỗi tải biểu đồ:", error);
         if (error.message.includes("index")) {
-            alert("Lỗi: Cần tạo Index MỚI cho 'body_logs' (userId + date DESC) trên Firebase Console.");
+            showNotification("Cần tạo Index cho biểu đồ", "warning");
         }
     }
 }
