@@ -27,6 +27,7 @@ let isSubmitting = false; // Cờ chống spam click
 
 // --- 4. KHỞI TẠO ---
 document.addEventListener('DOMContentLoaded', async () => {
+    setupFoodSuggestions();
     // Lắng nghe trạng thái đăng nhập
     auth.onAuthStateChanged(async (user) => {
         if (user) {
@@ -51,6 +52,26 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     });
 });
+
+// --- HÀM TIỆN ÍCH: CHỐNG XSS ---
+function escapeHtml(text) {
+    if (!text) return text;
+    return text
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+}
+
+// --- HÀM TIỆN ÍCH: LẤY NGÀY GIỜ ĐỊA PHƯƠNG (Fix lỗi mất dữ liệu sáng sớm) ---
+function getLocalDateString() {
+    const d = new Date();
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+}
 
 // --- 4.1 AUTH LOGIC ---
 function toggleAuthMode() {
@@ -146,7 +167,7 @@ async function saveSettings() {
     // --- LƯU LỊCH SỬ CƠ THỂ VÀO FIREBASE ---
     // Dùng ID là ngày hiện tại để mỗi ngày chỉ lưu 1 bản ghi (ghi đè nếu cập nhật nhiều lần trong ngày)
     const dateInput = document.getElementById('set-date').value;
-    const logDate = dateInput ? dateInput : new Date().toISOString().split('T')[0];
+    const logDate = dateInput ? dateInput : getLocalDateString();
     const docId = `${userId}_${logDate}`;
     
     await db.collection('body_logs').doc(docId).set({
@@ -215,7 +236,7 @@ async function loadSettings() {
 
     // Mặc định chọn ngày hôm nay
     const dateInput = document.getElementById('set-date');
-    if(dateInput) dateInput.value = new Date().toISOString().split('T')[0];
+    if(dateInput) dateInput.value = getLocalDateString();
 }
 
 function updateSettingsForm() {
@@ -228,6 +249,66 @@ function updateSettingsForm() {
 }
 
 // --- 7. TÌM KIẾM & THÊM THỨC ĂN ---
+function setupFoodSuggestions() {
+    const input = document.getElementById('food-name');
+    const box = document.getElementById('food-suggestions');
+    
+    // Hàm debounce để tránh gọi API quá nhiều khi gõ
+    const debounce = (func, delay) => {
+        let timer;
+        return (...args) => {
+            clearTimeout(timer);
+            timer = setTimeout(() => func.apply(this, args), delay);
+        };
+    };
+
+    input.addEventListener('input', debounce(async (e) => {
+        const val = e.target.value.toLowerCase().trim();
+        if (val.length < 2) { // Chỉ tìm khi gõ trên 2 ký tự
+            box.classList.add('hidden');
+            return;
+        }
+
+        try {
+            // Tìm kiếm prefix (bắt đầu bằng...) trong Firestore
+            const snapshot = await db.collection('foods')
+                .orderBy('name')
+                .startAt(val)
+                .endAt(val + '\uf8ff')
+                .limit(5)
+                .get();
+
+            box.innerHTML = '';
+            if (snapshot.empty) {
+                box.classList.add('hidden');
+                return;
+            }
+
+            snapshot.forEach(doc => {
+                const data = doc.data();
+                const li = document.createElement('li');
+                li.innerText = data.name;
+                li.onclick = () => {
+                    input.value = data.name;
+                    box.classList.add('hidden');
+                    searchFood(); // Tự động chọn và kích hoạt tìm kiếm
+                };
+                box.appendChild(li);
+            });
+            box.classList.remove('hidden');
+        } catch (err) {
+            console.error("Lỗi gợi ý món ăn:", err);
+        }
+    }, 300));
+
+    // Ẩn gợi ý khi click ra ngoài
+    document.addEventListener('click', (e) => {
+        if (!input.contains(e.target) && !box.contains(e.target)) {
+            box.classList.add('hidden');
+        }
+    });
+}
+
 async function searchFood() {
     const query = document.getElementById('food-name').value.toLowerCase().trim();
     if (!query) return;
@@ -335,7 +416,7 @@ async function addFoodToLog() {
     } catch (e) { console.error("Lỗi kiểm tra food:", e); }
 
     // 3. Lưu log vào DB 'logs'
-    const todayStr = new Date().toISOString().split('T')[0];
+    const todayStr = getLocalDateString();
     const logPromise = db.collection('logs').add({
         userId: userId,
         date: todayStr,
@@ -427,7 +508,7 @@ async function addActivityToLog() {
     todayActivityLog.push(newItem);
 
     // 2. Lưu vào Firebase collection 'activity_logs'
-    const todayStr = new Date().toISOString().split('T')[0];
+    const todayStr = getLocalDateString();
     await db.collection('activity_logs').add({
         userId: userId,
         date: todayStr,
@@ -445,51 +526,61 @@ async function addActivityToLog() {
 
 // --- 8. CẬP NHẬT GIAO DIỆN ---
 function updateUI() {
+    let totalConsumed = 0;
+    let totalBurned = 0;
+    let combinedItems = [];
+
+    // 1. Tổng hợp dữ liệu Ăn uống
+    todayLog.forEach(item => {
+        totalConsumed += item.totalKcal;
+        combinedItems.push({ ...item, type: 'food' });
+    });
+
+    // 2. Tổng hợp dữ liệu Vận động
+    todayActivityLog.forEach(item => {
+        totalBurned += item.burnedKcal;
+        combinedItems.push({ ...item, type: 'activity' });
+    });
+
+    // 3. Render danh sách tổng hợp "Hôm nay thế nào?"
     const list = document.getElementById('today-list');
     list.innerHTML = '';
     
-    let totalConsumed = 0;
+    // Sắp xếp theo thời gian (Cũ -> Mới)
+    combinedItems.sort((a, b) => {
+        const tA = a.timestamp.seconds ? a.timestamp.seconds * 1000 : new Date(a.timestamp).getTime();
+        const tB = b.timestamp.seconds ? b.timestamp.seconds * 1000 : new Date(b.timestamp).getTime();
+        return tA - tB;
+    });
 
-    todayLog.forEach(item => {
-        totalConsumed += item.totalKcal;
-        
-        // Xử lý hiển thị giờ:phút
+    combinedItems.forEach(item => {
         let timeStr = '';
         if (item.timestamp) {
             const d = item.timestamp.seconds ? new Date(item.timestamp.seconds * 1000) : new Date(item.timestamp);
             timeStr = d.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
         }
-
+        const safeName = escapeHtml(item.name);
         const li = document.createElement('li');
-        li.innerHTML = `
-            <span><small style="color:#999; margin-right:4px">${timeStr}</small> ${item.name} <small>(${item.weight}g)</small></span>
-            <b>${item.totalKcal} kcal</b>
-        `;
+        li.style.cursor = 'pointer'; // Thêm con trỏ tay để biết click được
+        
+        if (item.type === 'food') {
+            li.innerHTML = `
+                <span><small style="color:#999; margin-right:4px">${timeStr}</small> ${safeName} <small>(${item.weight}g)</small></span>
+                <b style="color:var(--primary-dark)">+${item.totalKcal} kcal</b>
+            `;
+        } else {
+            li.innerHTML = `
+                <span><small style="color:#999; margin-right:4px">${timeStr}</small> ${safeName} <small>(${item.duration}p)</small></span>
+                <b style="color: #e53935;">-${item.burnedKcal} kcal</b>
+            `;
+        }
+        
+        // Thêm sự kiện click để mở modal sửa
+        // Lưu ý: item.id phải được lấy từ lúc load dữ liệu (xem phần sửa đổi loadTodayLog bên dưới)
+        li.onclick = () => openEditModal(item.id, item.type);
+        
         list.appendChild(li);
     });
-
-    // --- Cập nhật cho vận động ---
-    const activityList = document.getElementById('today-activity-list');
-    activityList.innerHTML = '';
-    let totalBurned = 0;
-    todayActivityLog.forEach(item => {
-        totalBurned += item.burnedKcal;
-
-        // Xử lý hiển thị giờ:phút
-        let timeStr = '';
-        if (item.timestamp) {
-            const d = item.timestamp.seconds ? new Date(item.timestamp.seconds * 1000) : new Date(item.timestamp);
-            timeStr = d.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
-        }
-
-        const li = document.createElement('li');
-        li.innerHTML = `
-            <span><small style="color:#999; margin-right:4px">${timeStr}</small> ${item.name} <small>(${item.duration} phút)</small></span>
-            <b style="color: #e53935;">-${item.burnedKcal} kcal</b>
-        `;
-        activityList.appendChild(li);
-    });
-    // --- Kết thúc cập nhật vận động ---
 
     // Tính toán lại lượng calo còn lại
     const remaining = currentUser.tdee - totalConsumed + totalBurned;
@@ -524,10 +615,117 @@ function updateUI() {
     }
 }
 
+// --- 8.1 LOGIC CHỈNH SỬA & XÓA (MỚI) ---
+function openEditModal(id, type) {
+    const modal = document.getElementById('edit-modal');
+    const nameEl = document.getElementById('edit-item-name');
+    const qtyEl = document.getElementById('edit-quantity');
+    const labelEl = document.getElementById('edit-label');
+    
+    // Tìm item trong mảng local
+    let item;
+    if (type === 'food') {
+        item = todayLog.find(i => i.id === id);
+        labelEl.innerText = "Khối lượng (g):";
+        qtyEl.value = item.weight;
+    } else {
+        item = todayActivityLog.find(i => i.id === id);
+        labelEl.innerText = "Thời gian (phút):";
+        qtyEl.value = item.duration;
+    }
+
+    if (!item) return; // Không tìm thấy
+
+    nameEl.innerText = item.name;
+    document.getElementById('edit-id').value = id;
+    document.getElementById('edit-type').value = type;
+    
+    modal.classList.remove('hidden');
+}
+
+function closeEditModal() {
+    document.getElementById('edit-modal').classList.add('hidden');
+}
+
+async function saveEditItem() {
+    const id = document.getElementById('edit-id').value;
+    const type = document.getElementById('edit-type').value;
+    const newQty = parseFloat(document.getElementById('edit-quantity').value);
+
+    if (isNaN(newQty) || newQty <= 0) {
+        alert("Số lượng không hợp lệ");
+        return;
+    }
+
+    closeEditModal();
+    showNotification("Đang cập nhật...", "warning");
+
+    if (type === 'food') {
+        const item = todayLog.find(i => i.id === id);
+        // Tính lại calo: (Kcal cũ / Weight cũ) * Weight mới
+        // Hoặc chính xác hơn: (kcalUnit * newWeight) / 100
+        const newTotal = Math.round((item.kcalUnit * newQty) / 100);
+        
+        await db.collection('logs').doc(id).update({
+            weight: newQty,
+            totalKcal: newTotal
+        });
+        await loadTodayLog(); // Tải lại để cập nhật UI
+    } else {
+        const item = todayActivityLog.find(i => i.id === id);
+        // Tính lại calo đốt: (Burned cũ / Duration cũ) * Duration mới
+        const ratePerMin = item.burnedKcal / item.duration;
+        const newBurned = Math.round(ratePerMin * newQty);
+
+        await db.collection('activity_logs').doc(id).update({
+            duration: newQty,
+            burnedKcal: newBurned
+        });
+        await loadTodayActivityLog();
+    }
+    updateUI();
+    showNotification("Đã cập nhật thành công!");
+}
+
+async function deleteItem() {
+    if(!confirm("Bạn có chắc muốn xóa mục này không?")) return;
+    
+    const id = document.getElementById('edit-id').value;
+    const type = document.getElementById('edit-type').value;
+    const collection = (type === 'food') ? 'logs' : 'activity_logs';
+
+    closeEditModal();
+    
+    try {
+        await db.collection(collection).doc(id).delete();
+        
+        // Xóa khỏi mảng local để UI cập nhật nhanh
+        if (type === 'food') {
+            todayLog = todayLog.filter(i => i.id !== id);
+        } else {
+            todayActivityLog = todayActivityLog.filter(i => i.id !== id);
+        }
+        updateUI();
+        showNotification("Đã xóa mục đã chọn");
+    } catch (e) {
+        console.error(e);
+        alert("Lỗi khi xóa: " + e.message);
+    }
+}
+
+// --- 8.2 MODAL HƯỚNG DẪN ---
+function openGuideModal() {
+    document.getElementById('guide-modal').classList.remove('hidden');
+}
+
+function closeGuideModal() {
+    document.getElementById('guide-modal').classList.add('hidden');
+}
+
 // --- 9. TẢI DỮ LIỆU TỪ FIREBASE ---
 async function loadTodayLog() {
     try {
-        const todayStr = new Date().toISOString().split('T')[0];
+        const todayStr = getLocalDateString();
         // Query logs của user trong ngày hôm nay
         const snapshot = await db.collection('logs')
             .where('userId', '==', userId)
@@ -536,7 +734,8 @@ async function loadTodayLog() {
         
         todayLog = [];
         snapshot.forEach(doc => {
-            todayLog.push(doc.data());
+            // QUAN TRỌNG: Lưu thêm ID để sửa/xóa
+            todayLog.push({ id: doc.id, ...doc.data() });
         });
         updateUI();
     } catch (error) {
@@ -546,7 +745,7 @@ async function loadTodayLog() {
 
 async function loadTodayActivityLog() {
     try {
-        const todayStr = new Date().toISOString().split('T')[0];
+        const todayStr = getLocalDateString();
         const snapshot = await db.collection('activity_logs')
             .where('userId', '==', userId)
             .where('date', '==', todayStr)
@@ -554,7 +753,7 @@ async function loadTodayActivityLog() {
         
         todayActivityLog = [];
         snapshot.forEach(doc => {
-            todayActivityLog.push(doc.data());
+            todayActivityLog.push({ id: doc.id, ...doc.data() });
         });
         // updateUI() sẽ được gọi sau khi hàm này và loadTodayLog() hoàn tất
     } catch (error) {
@@ -616,11 +815,12 @@ async function loadHistory() {
                 list.appendChild(dateLi);
             }
 
+            const safeName = escapeHtml(item.name);
             const li = document.createElement('li');
             if (item.type === 'food') {
-                li.innerHTML = `<span><small style="color:#999; margin-right:5px">${timeStr}</small> ${item.name} <small>(${item.weight}g)</small></span><b style="color:var(--primary-dark)">+${item.totalKcal}</b>`;
+                li.innerHTML = `<span><small style="color:#999; margin-right:5px">${timeStr}</small> ${safeName} <small>(${item.weight}g)</small></span><b style="color:var(--primary-dark)">+${item.totalKcal}</b>`;
             } else {
-                li.innerHTML = `<span><small style="color:#999; margin-right:5px">${timeStr}</small> ${item.name} <small>(${item.duration}p)</small></span><b style="color:#e53935">-${item.burnedKcal}</b>`;
+                li.innerHTML = `<span><small style="color:#999; margin-right:5px">${timeStr}</small> ${safeName} <small>(${item.duration}p)</small></span><b style="color:#e53935">-${item.burnedKcal}</b>`;
             }
             list.appendChild(li);
         });
